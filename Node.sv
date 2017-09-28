@@ -26,7 +26,136 @@ module Node #(parameter NODEID = 0) (
   input  logic       put_inbound,      // Router is transferring to node
   input  logic [7:0] payload_inbound); // Data sent from router to node
 
-endmodule : Node
+  pkt_t data_in, data_out, reg_out, reg_in, chopReg, go_out;
+  logic re, we, full, empty, regEmpty, en_reg_n;
+  logic [3:0] count, n2rcount, r2ncount;
+
+  FIFO queue(.*);
+  // register choppingReg(.clock(clock), .reset_L(reset_n), .load_L(en_reg_n),
+  //                     .in(reg_in), .out(reg_out));
+
+  assign cQ_full = (count == 4'd5);
+
+
+
+  always_ff @ (posedge clock, negedge reset_n) begin //Q read
+    if(~reset_n) begin
+      count <= 0;
+      re <= 0;
+      we <= 0;
+      regEmpty <= 1;
+      n2rcount <= 0;
+      put_outbound <= 0;
+    end
+
+    else begin
+      if(pkt_in_avail && (~cQ_full)) begin
+        if(empty && regEmpty) begin   //Queue empty and choppng reg empty so fi
+          chopReg <= pkt_in;
+          regEmpty <= 0;
+          count <= count + 1;
+          we <= 0;
+        end
+        else if((~regEmpty) && pkt_in_avail) begin //value in chopping reg already so put in Queue
+          data_in <= pkt_in;
+          we <= 1;
+          count <= count + 1;
+        end
+      end
+      else begin
+        we <= 0;
+      end
+      if(regEmpty && (~empty)) begin //value was read into Router send next val
+        re <= 1;
+        chopReg <= data_out;
+        regEmpty <= 0;
+      end
+      else begin
+        re <= 0;
+      end
+
+
+      // send packet to router when value is in chopping reg
+      if((~regEmpty && free_outbound) || put_outbound) begin
+        unique case(n2rcount)
+          4'd0: begin
+            payload_outbound <= chopReg[31:24];
+            n2rcount <= n2rcount + 1;
+            put_outbound <= 1;
+          end
+          4'd1: begin
+            payload_outbound <= chopReg[23:16];
+            n2rcount <= n2rcount + 1;
+            put_outbound <= 1;
+          end
+          4'd2: begin
+            payload_outbound <= chopReg[15:8];
+            n2rcount <= n2rcount + 1;
+            put_outbound <= 1;
+          end
+          4'd3: begin
+            payload_outbound <= chopReg[7:0];
+            n2rcount <= n2rcount + 1;
+            put_outbound <= 1;
+
+          end
+          4'd4: begin     // reset n2rcount, put_outbound
+            n2rcount <= 0;
+            chopReg <= 32'bx;
+            put_outbound <= 0;
+            count <= count - 1;
+            regEmpty <= 1;
+          end
+        endcase
+      end
+    end
+  end
+
+  logic pl1_load, pl2_load, pl3_load, pl4_load;
+  logic [7:0] pl4_out, pl1_out, pl2_out, pl3_out;
+  logic [3:0] en_reg;
+  logic [1:0] select;
+  logic [7:0] r_in;
+
+  assign r_in = payload_inbound;
+  register pl1(.load(pl1_load), .in(r_in), .out(pl1_out), .*);
+  register pl2(.load(pl2_load), .in(r_in), .out(pl2_out), .*);
+  register pl3(.load(pl3_load), .in(r_in), .out(pl3_out), .*);
+  register pl4(.load(pl4_load), .in(r_in), .out(pl4_out), .*);
+
+  demux regEn(.in(1), .out(en_reg), .sel(select));
+  assign pkt_out = {pl1_out, pl2_out, pl3_out, pl4_out};
+
+  always_ff @ (posedge clock, negedge reset_n) begin //router to node transfer
+    if(~reset_n) begin
+      free_inbound <= 1;
+      select <= 2'b0;
+      pkt_out_avail <= 0;
+      pl1_load <= 1;
+    end
+    else if(put_inbound) begin
+      pl1_load <= 0;
+      pl2_load <= en_reg[0];
+      pl3_load <= en_reg[1];
+      pl4_load <= en_reg[2];
+      free_inbound <= 0;
+      pkt_out_avail <= 0;
+      select <= select + 1;
+      if(select == 3) begin
+        free_inbound <= 1;
+        pl1_load <= 1;
+        pl4_load <= 0;
+        pkt_out_avail <= 1;
+
+        select <= 2'b0;
+      end
+    end
+    else begin
+      pkt_out_avail <= 0;
+      select <= 2'b0;
+    end
+  end
+endmodule: Node
 
 /*
  *  Create a FIFO (First In First Out) buffer with depth 4 using the given
@@ -38,12 +167,73 @@ endmodule : Node
  *    - If a write is pending while the buffer is full, do nothing
  *    - If a read is pending while the buffer is empty, do nothing
  */
-module FIFO #(parameter WIDTH=32) (
-    input logic              clock, reset_n,
-    input logic [WIDTH-1:0]  data_in,
-    input logic              we, re,
-    output logic [WIDTH-1:0] data_out,
-    output logic             full, empty);
+ module FIFO (
+   input logic              clock, reset_n,
+   input pkt_t              data_in,
+   input logic              we, re,
+   output pkt_t             data_out,
+   output logic             full, empty);
+
+   pkt_t [3:0] Q;
+   logic [2:0] putPtr, getPtr; // pointers wrap automatically
+   logic [3:0] count;
+
+   assign empty = (count == 0);
+   assign full  = (count == 4'd5);
+
+   assign data_out = (~empty)? Q[0] : 32'bz; // combinatinally assign data_out
+
+   always_ff @(posedge clock, negedge reset_n) begin
+     if (~reset_n) begin
+       count  <= 0;
+       getPtr <= 0;
+       putPtr <= 0;
+     end
+     else begin
+        if (we && (!full)) begin //not full so put in queue
+          Q[putPtr] = data_in;
+          putPtr = putPtr + 1;
+          count <= count + 1;
+        end
+        if(re && !empty) begin //remove from queue when re is asserted
+           putPtr <= putPtr - 1;
+           Q <= Q[3:1];
+           count = count - 1;
+        end
+     end
+   end
+ endmodule: FIFO
+/*
+ * module: register
+ *
+ * A positive-edge clocked parameterized register with (active low) load enable
+ * and asynchronous reset. The parameter is the bit-width of the register.
+ */
+module register #(parameter WIDTH = 8)(
+   output logic [WIDTH - 1:0]   out,
+   input  logic [WIDTH - 1:0]   in,
+   input                  load,
+   input                  clock,
+   input                  reset_n);
+
+   always_ff @ (posedge clock, negedge reset_n) begin
+      if(~reset_n)
+         out <= 'b0000;
+      else if (load)
+         out <= in;
+   end
+
+endmodule
 
 
-endmodule : FIFO
+module demux #(parameter OUT_WIDTH = 4, IN_WIDTH = 2, DEFAULT = 0)(
+   input logic                    in,
+   input  logic [IN_WIDTH-1:0]       sel,
+   output logic [OUT_WIDTH-1:0] out);
+
+   always_comb begin
+      out = (DEFAULT==0)?'b0:(~('b0));
+      out[sel] = in;
+   end
+
+endmodule
