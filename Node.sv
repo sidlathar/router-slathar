@@ -28,14 +28,20 @@ module Node #(parameter NODEID = 0) (
 
   pkt_t data_in, data_out, reg_out, reg_in, chopReg, go_out;
   logic re, we, full, empty, regEmpty, en_reg_n;
-  logic [3:0] count, n2rcount, r2ncount;
+  logic [3:0] n2rcount, r2ncount;
+  logic [3:0] count, count1;
+  //assign cQ_full = full;
 
   FIFO queue(.*);
   // register choppingReg(.clock(clock), .reset_L(reset_n), .load_L(en_reg_n),
   //                     .in(reg_in), .out(reg_out));
 
-  assign cQ_full = (count == 4'd5);
 
+  pkt_t [3:0] Qu;
+  assign cQ_full = (count==4'd4);
+
+  assign Qu = queue.Q;
+  assign count1 = queue.count;
 
 
   always_ff @ (posedge clock, negedge reset_n) begin //Q read
@@ -49,27 +55,29 @@ module Node #(parameter NODEID = 0) (
     end
 
     else begin
-      if(pkt_in_avail && (~cQ_full)) begin
-        if(empty && regEmpty) begin   //Queue empty and choppng reg empty so fi
-          chopReg <= pkt_in;
-          regEmpty <= 0;
-          count <= count + 1;
-          we <= 0;
-        end
-        else if((~regEmpty) && pkt_in_avail) begin //value in chopping reg already so put in Queue
+      if(~cQ_full && pkt_in_avail) begin //value in chopping reg already so put in Queue
           data_in <= pkt_in;
           we <= 1;
           count <= count + 1;
-        end
       end
       else begin
         we <= 0;
       end
-      if(regEmpty && (~empty)) begin //value was read into Router send next val
+
+      if(regEmpty && (~empty) && (data_out !== 32'b0)) begin //value was read into Router send next val
         re <= 1;
         chopReg <= data_out;
         regEmpty <= 0;
+        count <= (count == 0)? count :count - 1;
       end
+      else if (regEmpty && (~empty) && (data_out == 32'b0)) begin
+        re <= 1;
+        regEmpty <= 1;
+      end
+      // else if (regEmpty && (~empty)) begin
+      //   re <= 1;
+      //   regEmpty <= 1;
+      // end
       else begin
         re <= 0;
       end
@@ -103,7 +111,7 @@ module Node #(parameter NODEID = 0) (
             n2rcount <= 0;
             chopReg <= 32'bx;
             put_outbound <= 0;
-            count <= count - 1;
+            //count <= count - 1;
             regEmpty <= 1;
           end
         endcase
@@ -123,7 +131,17 @@ module Node #(parameter NODEID = 0) (
   register pl3(.load(pl3_load), .in(r_in), .out(pl3_out), .*);
   register pl4(.load(pl4_load), .in(r_in), .out(pl4_out), .*);
 
+  // task jumpAvail();
+  //   @(posedge clock);
+  //   pkt_out_avail = 1;
+  //   @(posedge clock);
+  //   pkt_out_avail = 0;
+  // endtask
+
+
+
   demux regEn(.in(1), .out(en_reg), .sel(select));
+  logic assignVal;
   assign pkt_out = {pl1_out, pl2_out, pl3_out, pl4_out};
 
   always_ff @ (posedge clock, negedge reset_n) begin //router to node transfer
@@ -132,6 +150,7 @@ module Node #(parameter NODEID = 0) (
       select <= 2'b0;
       pkt_out_avail <= 0;
       pl1_load <= 1;
+      assignVal <= 0;
     end
     else if(put_inbound) begin
       pl1_load <= 0;
@@ -143,12 +162,19 @@ module Node #(parameter NODEID = 0) (
       select <= select + 1;
       if(select == 3) begin
         free_inbound <= 1;
-        pl1_load <= 1;
+        pl1_load <= 0;
         pl4_load <= 0;
-        pkt_out_avail <= 1;
+        pkt_out_avail <= 0;
+        assignVal <= 1;
+        //jumpAvail();
 
-        select <= 2'b0;
       end
+    end
+    else if(assignVal) begin
+      pl1_load <= 1;
+      select <= 2'b0;
+      pkt_out_avail <= 1;
+      assignVal <= 0;
     end
     else begin
       pkt_out_avail <= 0;
@@ -167,6 +193,7 @@ endmodule: Node
  *    - If a write is pending while the buffer is full, do nothing
  *    - If a read is pending while the buffer is empty, do nothing
  */
+
  module FIFO (
    input logic              clock, reset_n,
    input pkt_t              data_in,
@@ -179,7 +206,7 @@ endmodule: Node
    logic [3:0] count;
 
    assign empty = (count == 0);
-   assign full  = (count == 4'd5);
+   assign full  = (count == 4'd4);
 
    assign data_out = (~empty)? Q[0] : 32'bz; // combinatinally assign data_out
 
@@ -190,16 +217,16 @@ endmodule: Node
        putPtr <= 0;
      end
      else begin
-        if (we && (!full)) begin //not full so put in queue
+      if (we && (!full)) begin //not full so put in queue
           Q[putPtr] = data_in;
           putPtr = putPtr + 1;
-          count <= count + 1;
-        end
-        if(re && !empty) begin //remove from queue when re is asserted
-           putPtr <= putPtr - 1;
-           Q <= Q[3:1];
+          count = count + 1;
+      end
+      if(re && !empty) begin //remove from queue when re is asserted
+           putPtr = putPtr - 1;
+           Q = Q[3:1];
            count = count - 1;
-        end
+      end
      end
    end
  endmodule: FIFO

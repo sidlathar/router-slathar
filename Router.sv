@@ -17,22 +17,34 @@ module Router #(parameter ROUTERID = 0) (
     output logic [3:0]      put_outbound,      // Router is transferring to node
     output logic [3:0][7:0] payload_outbound); // Data sent from router to node
 
+
     //Begin input ports to intermediate regs
     pkt_t reg0, reg1, reg2, reg3;
     logic [3:0] regEmpty;
     pkt_t [3:0] pkt_out;
     logic [3:0] pkt_out_avail_reg;
-    logic [3:0] allowRec;
     logic [3:0] read_done;
     logic [3:0] routerID;
 
     assign routerID = ROUTERID;
 
     //Get chopped inputs from input port and store them in pkt_t register
-    // for (int n = 0; n < 4; n++) begin
-    //   if(put_inbound[n] && free_inbound[n]) begin
-    //     recv_routernew(n[3:0]);
-    //   end
+
+    logic [3:0] we_in;
+    logic [3:0] re_in;
+    logic [3:0] full_in;
+    logic [3:0] empty_in;
+    pkt_t [3:0] data_in_in;
+    pkt_t [3:0] data_out_in;
+
+    FIFO queue00(.data_in(data_in_in[0]), .we(we_in[0]), .re(re_in[0]), .data_out(data_out_in[0]),
+                .full(full_in[0]), .empty(empty_in[0]), .*);
+    FIFO queue11(.data_in(data_in_in[1]), .we(we_in[1]), .re(re_in[1]), .data_out(data_out_in[1]),
+                .full(full_in[1]), .empty(empty_in[1]), .*);
+    FIFO queue22(.data_in(data_in_in[2]), .we(we_in[2]), .re(re_in[2]), .data_out(data_out_in[2]),
+                .full(full_in[2]), .empty(empty_in[2]), .*);
+    FIFO queue33(.data_in(data_in_in[3]), .we(we_in[3]), .re(re_in[3]), .data_out(data_out_in[3]),
+                .full(full_in[3]), .empty(empty_in[3]), .*);
 
     always_ff @ (posedge clock, negedge reset_n) begin
       if(~reset_n) begin
@@ -40,7 +52,13 @@ module Router #(parameter ROUTERID = 0) (
         pkt_out_avail_reg[0] <= 1'b0;
       end
       else begin
-        if(put_inbound[0] && free_inbound[0]) begin
+        if((~full_in[0]) && (~put_inbound[0])) begin
+          free_inbound[0] <= 1'b1;
+        end
+        else begin
+          free_inbound[0] <= 1'b0;
+        end
+        if(put_inbound[0] && free_inbound[0] && (~full_in[0])) begin
           recv_router0();
         end
       end
@@ -52,6 +70,12 @@ module Router #(parameter ROUTERID = 0) (
         pkt_out_avail_reg[1] <= 1'b0;
       end
       else begin
+        if((~full_in[1]) && (~put_inbound[1])) begin
+          free_inbound[1] <= 1'b1;
+        end
+        else begin
+          free_inbound[1] <= 1'b0;
+        end
         if(put_inbound[1] && free_inbound[1]) begin
           recv_router1();
         end
@@ -64,6 +88,12 @@ module Router #(parameter ROUTERID = 0) (
         pkt_out_avail_reg[2] <= 1'b0;
       end
       else begin
+        if((~full_in[2]) && (~put_inbound[2])) begin
+          free_inbound[2] <= 1'b1;
+        end
+        else begin
+          free_inbound[2] <= 1'b0;
+        end
         if(put_inbound[2] && free_inbound[2]) begin
           recv_router2();
         end
@@ -76,32 +106,17 @@ module Router #(parameter ROUTERID = 0) (
         pkt_out_avail_reg[3] <= 1'b0;
       end
       else begin
+        if((~full_in[3]) && (~put_inbound[3])) begin
+          free_inbound[3] <= 1'b1;
+        end
+        else begin
+          free_inbound[3] <= 1'b0;
+        end
         if(put_inbound[3] && free_inbound[3]) begin
           recv_router3();
         end
       end
     end
-    //
-    // choppingAssemble node0(.payload_inbound(payload_inbound[0]),
-    //                        .read_done(read_done[0]),
-    //                        .pkt_out_avail_reg(pkt_out_avail_reg[0]),
-    //                        .pkt_out(pkt_out[0]), .allowRec(allowRec[0]),
-    //                        .regEmpty(regEmpty[0]), .*);
-    // choppingAssemble node1(.payload_inbound(payload_inbound[1]),
-    //                       .read_done(read_done[1]),
-    //                       .pkt_out_avail_reg(pkt_out_avail_reg[1]),
-    //                       .pkt_out(pkt_out[1]), .allowRec(allowRec[1]),
-    //                       .regEmpty(regEmpty[1]),.*);
-    // choppingAssemble node2(.payload_inbound(payload_inbound[2]),
-    //                        .read_done(read_done[2]),
-    //                        .pkt_out_avail_reg(pkt_out_avail_reg[2]),
-    //                        .pkt_out(pkt_out[2]), .allowRec(allowRec[2]),
-    //                        .regEmpty(regEmpty[2]), .*);
-    // choppingAssemble node3(.payload_inbound(payload_inbound[3]),
-    //                       .read_done(read_done[3]),
-    //                       .pkt_out_avail_reg(pkt_out_avail_reg[3]),
-    //                       .pkt_out(pkt_out[3]), .allowRec(allowRec[3]),
-    //                       .regEmpty(regEmpty[3]), .*);
 
 
 
@@ -112,24 +127,28 @@ module Router #(parameter ROUTERID = 0) (
     end
     else begin
       for (int l = 0; l < 4; l++) begin
-        case({routerID,val[l].dest})
-            8'b0000_0000: output_Port[l] = 0;
-            8'b0000_0001: output_Port[l] = 2;
-            8'b0000_0010: output_Port[l] = 3;
-            8'b0000_0011: output_Port[l] = 1;
-            8'b0000_0100: output_Port[l] = 1;
-            8'b0000_0101: output_Port[l] = 1;
-            8'b0000_1111: output_Port[l] = -1;
+        if(~empty_in[l])
+          case({routerID,data_out_in[l].dest})
+              8'b0000_0000: output_Port[l] = 0;
+              8'b0000_0001: output_Port[l] = 2;
+              8'b0000_0010: output_Port[l] = 3;
+              8'b0000_0011: output_Port[l] = 1;
+              8'b0000_0100: output_Port[l] = 1;
+              8'b0000_0101: output_Port[l] = 1;
+              8'b0000_1111: output_Port[l] = -1;
 
-            8'b0001_0000: output_Port[l] = 3;
-            8'b0001_0001: output_Port[l] = 3;
-            8'b0001_0010: output_Port[l] = 3;
-            8'b0001_0011: output_Port[l] = 0;
-            8'b0001_0100: output_Port[l] = 1;
-            8'b0001_0101: output_Port[l] = 2;
-            8'b0001_1111: output_Port[l] = -1;
-            default: output_Port = -1;
-        endcase
+              8'b0001_0000: output_Port[l] = 3;
+              8'b0001_0001: output_Port[l] = 3;
+              8'b0001_0010: output_Port[l] = 3;
+              8'b0001_0011: output_Port[l] = 0;
+              8'b0001_0100: output_Port[l] = 1;
+              8'b0001_0101: output_Port[l] = 2;
+              8'b0001_1111: output_Port[l] = -1;
+              default: output_Port = -1;
+          endcase
+        else begin
+          output_Port[l] = -1;
+        end
       end
     end
   end
@@ -143,6 +162,8 @@ module Router #(parameter ROUTERID = 0) (
   pkt_t [3:0] data_in;
   pkt_t [3:0] data_out;
 
+
+
   FIFO queue0(.data_in(data_in[0]), .we(we[0]), .re(re[0]), .data_out(data_out[0]),
               .full(full[0]), .empty(empty[0]), .*);
   FIFO queue1(.data_in(data_in[1]), .we(we[1]), .re(re[1]), .data_out(data_out[1]),
@@ -153,14 +174,16 @@ module Router #(parameter ROUTERID = 0) (
               .full(full[3]), .empty(empty[3]), .*);
 
 
-  //assign free_inbound = regEmpty;
-  //assign allowRec = put_inbound && regEmpty;
+
+
   logic [1:0] priorityNum;
   pkt_t [3:0] val;
   logic [3:0][3:0] destinations;
   logic pkt_avail;
-  logic [3:0] op, whatval;
+  logic [3:0] op, whatval, matchFound;
 
+
+  assign val = queue00.Q;
 
 
   function logic matcingDest(input logic [3:0][3:0] destinations,
@@ -178,74 +201,65 @@ module Router #(parameter ROUTERID = 0) (
 
   always_ff @ (posedge clock, negedge reset_n) begin
     if(~reset_n) begin
-      //read_done <= 4'b1111;
+      read_done <= 4'b0000;
       priorityNum <= 2'd0;
-      val <= 0;
       pkt_avail <= 0;
       we <= 4'b0000;
+      matchFound <= 0;
     end
     else begin
       we <= 4'b0000;
-      if(pkt_out_avail_reg > 4'b0000) begin
-        //read_done <= 4'b0000;
-        pkt_avail <= 1;
-        //genvar i;
-        //generate
+      re_in <= 4'b0000;
+
+      //priorityNum <= priorityNum + 1'b1;
+      if(~(empty_in == 4'b1111)) begin
+        destinations <= 0;
+        fork
           for(int i = 0; i < 4; i++) begin
-            if(pkt_out_avail_reg[i]) begin
-              val[i] = pkt_out[i];
-              destinations[i] = pkt_out[i].dest;
-              end
+            if(~(empty_in[i[1:0] + priorityNum] == 1'b1)) begin
+              matchFound <= 0;
+
+              fork
+                automatic int j = i;
+                automatic int k;
+                for (k = 0; k < j ; k++) begin
+                  if(data_out_in[j[1:0] + priorityNum].dest == destinations[k]) begin
+                    matchFound <= 1'b1;
+                  end
+                end
+
+                if(~matchFound && (~full[output_Port[j[1:0] + priorityNum]])) begin
+                  destinations[j] <= data_out_in[j[1:0] + priorityNum].dest;
+
+                  disableEx(output_Port[j[1:0] + priorityNum], j[1:0] + priorityNum);
+                end
+                else begin
+                  destinations[j] <= -1;
+                end
+              join_none
+            end
             else begin
-              val[i].dest = -1;
-              //read_done[i] <= 1'b1;
-              destinations[i] = -1;
+              continue;
             end
           end
-        //endgenerate
-      end
-
-      else begin pkt_avail <= 0; end
-
-      if (pkt_avail) begin
-        priorityNum <= priorityNum + 1;
-        //genvar j;
-        //generate
-          for(int j = 0; j < 4; j++) begin
-
-            if (~(val[j].dest == -1) && ~(matcingDest(destinations, j[3:0]))
-                    && ~full[output_Port[j]]) begin
-              op <= output_Port[j];
-              whatval <= j;
-              data_in[output_Port[j]] <= val[j];
-              we[output_Port[j]] <= 1'b1;
-              //read_done[j] <= 1'b1;
-            end
-          end
-        //endgenerate
+        join_none
       end
     end
   end
 
 
+  task automatic disableEx(input logic [1:0]wn, input logic [3:0] rn);
+    data_in[wn] <= data_out_in[rn];
+    we[wn] <= 1;
+    re_in[rn] <= 1;
+    @(posedge clock)
+    we[wn] <= 0;
+    re_in[rn] <= 0;
+  endtask
+
+
 
   //borrowed from NodeTB.sv
-
-
-  // task send_router(input pkt_t pkt, input logic [3:0] whatQ);
-  //   put_outbound[whatQ] <= 1;
-  //   payload_outbound[whatQ] <= {pkt.src, pkt.dest};
-  //   re[whatQ] <= 1;
-  //   @(posedge clock);
-  //   payload_outbound[whatQ] <= pkt.data[23:16];
-  //   re[whatQ] <= 0;
-  //   @(posedge clock);
-  //   payload_outbound[whatQ] <= pkt.data[15:8];
-  //   @(posedge clock);
-  //   payload_outbound[whatQ] <= pkt.data[7:0];
-  //   @(posedge clock);
-  //   put_outbound[whatQ] <= 0;
-  // endtask
 
   task send_router0(input pkt_t pkt, input logic [3:0] whatQ);
     put_outbound[whatQ] <= 1;
@@ -311,22 +325,6 @@ module Router #(parameter ROUTERID = 0) (
   endtask
 
 
-  // task recv_routernew(input logic [3:0] n);
-  //   free_inbound[n] <= 0;
-  //   {pkt_out[n].src, pkt_out[n].dest} <= payload_inbound[n];
-  //   @(posedge clock);
-  //   pkt_out[n].data[23:16] <= payload_inbound[n];
-  //   @(posedge clock);
-  //   pkt_out[n].data[15:8] <= payload_inbound[n];
-  //   @(posedge clock);
-  //   pkt_out[n].data[7:0] <= payload_inbound[n];
-  //
-  //   @(posedge clock);
-  //   free_inbound[n] <= 1;
-  //   pkt_out_avail_reg[n] <= 1;
-  //   @(posedge clock);
-  //   pkt_out_avail_reg[n] <= 0;
-  // endtask
 
   task recv_router0();
     free_inbound[0] <= 0;
@@ -339,10 +337,19 @@ module Router #(parameter ROUTERID = 0) (
     pkt_out[0].data[7:0] <= payload_inbound[0];
 
     @(posedge clock);
-    free_inbound[0] <= 1;
-    pkt_out_avail_reg[0] <= 1;
+    //free_inbound[0] <= 1;
+    we_in[0] <= 1;
+    data_in_in[0] <= pkt_out[0];
+    // pkt_out_avail_reg[0] <= 1;
     @(posedge clock);
-    pkt_out_avail_reg[0] <= 0;
+    if(~full_in[0]) begin
+      free_inbound[0] <= 1'b1;
+      we_in[0] <= 0;
+    end
+    else begin
+      we_in[0] <= 0;
+    end
+    // pkt_out_avail_reg[0] <= 0;
   endtask
 
   task recv_router1();
@@ -356,9 +363,13 @@ module Router #(parameter ROUTERID = 0) (
     pkt_out[1].data[7:0] <= payload_inbound[1];
     @(posedge clock);
     free_inbound[1] <= 1;
-    pkt_out_avail_reg[1] <= 1;
+    we_in[1] <= 1;
+    data_in_in[1] <= pkt_out[1];
     @(posedge clock);
-    pkt_out_avail_reg[1] <= 0;
+     we_in[1] <= 0;
+    // pkt_out_avail_reg[1] <= 1;
+    // @(posedge clock);
+    // pkt_out_avail_reg[1] <= 0;
   endtask
 
   task recv_router2();
@@ -372,9 +383,13 @@ module Router #(parameter ROUTERID = 0) (
     pkt_out[2].data[7:0] <= payload_inbound[2];
     @(posedge clock);
     free_inbound[2] <= 1;
-    pkt_out_avail_reg[2] <= 1;
+    we_in[2] <= 1;
+    data_in_in[2] <= pkt_out[2];
     @(posedge clock);
-    pkt_out_avail_reg[2] <= 0;
+     we_in[2] <= 0;
+    // pkt_out_avail_reg[2] <= 1;
+    // @(posedge clock);
+    // pkt_out_avail_reg[2] <= 0;
   endtask
 
   task recv_router3();
@@ -388,12 +403,14 @@ module Router #(parameter ROUTERID = 0) (
     pkt_out[3].data[7:0] <= payload_inbound[3];
     @(posedge clock);
     free_inbound[3] <= 1;
-    pkt_out_avail_reg[3] <= 1;
+    we_in[3] <= 1;
+    data_in_in[3] <= pkt_out[3];
     @(posedge clock);
-    pkt_out_avail_reg[3] <= 0;
+     we_in[3] <= 0;
+    // pkt_out_avail_reg[3] <= 1;
+    // @(posedge clock);
+    // pkt_out_avail_reg[3] <= 0;
   endtask
-
-
 
 
 //Get pkt from queue and send to the output port 8 bit at a time
@@ -445,6 +462,25 @@ module Router #(parameter ROUTERID = 0) (
       end
     end
   end
+endmodule: Router
+
+
+  // task recv_routernew(input logic [3:0] n);
+  //   free_inbound[n] <= 0;
+  //   {pkt_out[n].src, pkt_out[n].dest} <= payload_inbound[n];
+  //   @(posedge clock);
+  //   pkt_out[n].data[23:16] <= payload_inbound[n];
+  //   @(posedge clock);
+  //   pkt_out[n].data[15:8] <= payload_inbound[n];
+  //   @(posedge clock);
+  //   pkt_out[n].data[7:0] <= payload_inbound[n];
+  //
+  //   @(posedge clock);
+  //   free_inbound[n] <= 1;
+  //   pkt_out_avail_reg[n] <= 1;
+  //   @(posedge clock);
+  //   pkt_out_avail_reg[n] <= 0;
+  // endtask
 
   // always_ff @ (posedge clock, negedge reset_n) begin
   //   if(~reset_n) begin
@@ -466,7 +502,7 @@ module Router #(parameter ROUTERID = 0) (
   //     end
   //   end
   // end
-endmodule: Router
+
 
 // module choppingAssemble (
 //   input logic clock, reset_n,
@@ -527,3 +563,43 @@ endmodule: Router
 //     end
 //   end
 // endmodule: choppingAssemble
+
+
+//
+// choppingAssemble node0(.payload_inbound(payload_inbound[0]),
+//                        .read_done(read_done[0]),
+//                        .pkt_out_avail_reg(pkt_out_avail_reg[0]),
+//                        .pkt_out(pkt_out[0]), .allowRec(allowRec[0]),
+//                        .regEmpty(regEmpty[0]), .*);
+// choppingAssemble node1(.payload_inbound(payload_inbound[1]),
+//                       .read_done(read_done[1]),
+//                       .pkt_out_avail_reg(pkt_out_avail_reg[1]),
+//                       .pkt_out(pkt_out[1]), .allowRec(allowRec[1]),
+//                       .regEmpty(regEmpty[1]),.*);
+// choppingAssemble node2(.payload_inbound(payload_inbound[2]),
+//                        .read_done(read_done[2]),
+//                        .pkt_out_avail_reg(pkt_out_avail_reg[2]),
+//                        .pkt_out(pkt_out[2]), .allowRec(allowRec[2]),
+//                        .regEmpty(regEmpty[2]), .*);
+// choppingAssemble node3(.payload_inbound(payload_inbound[3]),
+//                       .read_done(read_done[3]),
+//                       .pkt_out_avail_reg(pkt_out_avail_reg[3]),
+//                       .pkt_out(pkt_out[3]), .allowRec(allowRec[3]),
+//                       .regEmpty(regEmpty[3]), .*);
+
+
+
+  // task send_router(input pkt_t pkt, input logic [3:0] whatQ);
+  //   put_outbound[whatQ] <= 1;
+  //   payload_outbound[whatQ] <= {pkt.src, pkt.dest};
+  //   re[whatQ] <= 1;
+  //   @(posedge clock);
+  //   payload_outbound[whatQ] <= pkt.data[23:16];
+  //   re[whatQ] <= 0;
+  //   @(posedge clock);
+  //   payload_outbound[whatQ] <= pkt.data[15:8];
+  //   @(posedge clock);
+  //   payload_outbound[whatQ] <= pkt.data[7:0];
+  //   @(posedge clock);
+  //   put_outbound[whatQ] <= 0;
+  // endtask
